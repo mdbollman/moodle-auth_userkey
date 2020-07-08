@@ -30,6 +30,7 @@ use auth_userkey\userkey_manager_interface;
 require_once($CFG->libdir . "/externallib.php");
 require_once($CFG->libdir.'/authlib.php');
 require_once($CFG->dirroot . '/user/lib.php');
+require_once($CFG->dirroot . '/user/profile/lib.php');
 
 /**
  * User key authentication plugin.
@@ -310,7 +311,18 @@ class auth_plugin_userkey extends auth_plugin_base {
         }
 
         $userid = user_create_user($user);
-        return $DB->get_record('user', ['id' => $userid]);
+        $User = $DB->get_record('user', ['id' => $userid]);
+
+        // Custom fields
+        if (!empty($user['customfields'])) {
+            foreach ($user['customfields'] as $customfield) {
+                $fieldname = "profile_field_".$customfield['type'];
+                $User->$fieldname = $customfield['value'];
+            }
+            profile_save_data($User);
+        }
+
+        return $User;
     }
 
     /**
@@ -360,8 +372,21 @@ class auth_plugin_userkey extends auth_plugin_base {
         }
         $userdata['id'] = $user->id;
 
+        // Custom fields
+        $updateProfile = false;
+        if (!empty($userdata['customfields'])) {
+            foreach ($userdata['customfields'] as $customfield) {
+                $userdata["profile_field_".$customfield['type']] = $customfield['value'];
+            }
+            $updateProfile = true;
+        }
+
         $userdata = (object) $userdata;
         user_update_user($userdata, false);
+        if($updateProfile){
+            profile_save_data($userdata);            
+        }
+
         return $DB->get_record('user', ['id' => $user->id]);
     }
 
@@ -555,6 +580,14 @@ class auth_plugin_userkey extends auth_plugin_base {
             if ($mappingfield != 'username') {
                 $parameters['username'] = new external_value(PARAM_USERNAME, 'A valid and unique username', VALUE_OPTIONAL);
             }
+
+            $parameters['customfields'] = new external_multiple_structure(
+                new external_single_structure(
+                    [
+                        'type'  => new external_value(PARAM_ALPHANUMEXT, 'The name of the custom field'),
+                        'value' => new external_value(PARAM_RAW, 'The value of the custom field')
+                    ]
+                ), 'User custom fields (also known as user profil fields)', VALUE_OPTIONAL);            
         }
 
         return $parameters;
